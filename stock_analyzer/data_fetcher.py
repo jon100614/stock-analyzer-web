@@ -2,10 +2,13 @@
 股票資料獲取模組
 
 使用 yfinance 作為主要資料源，支援多市場股票查詢。
+針對台股補充台灣證交所公開資料。
 """
 
 import yfinance as yf
 import pandas as pd
+import requests
+from datetime import datetime
 from typing import Optional
 
 from .utils import normalize_symbol
@@ -176,3 +179,37 @@ def fetch_dividends_and_splits(symbol: str, market: str = "auto") -> tuple[pd.Se
     ticker = normalize_symbol(symbol, market)
     stock = yf.Ticker(ticker)
     return stock.dividends, stock.splits
+
+
+def fetch_twse_fundamentals(stock_no: str) -> dict:
+    """
+    從台灣證交所取得台股基本面資料（本益比、殖利率、股價淨值比）。
+
+    Args:
+        stock_no: 台股數字代碼，例如 "2330"
+
+    Returns:
+        包含最新本益比、殖利率、股價淨值比的字典，若失敗則回傳空字典
+    """
+    try:
+        today = datetime.now().strftime("%Y%m%d")
+        url = f"https://www.twse.com.tw/rwd/zh/afterTrading/BWIBBU?date={today}&stockNo={stock_no}&response=json"
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("stat") != "OK" or not data.get("data"):
+            return {}
+
+        # 取最後一筆（最新交易日）
+        latest = data["data"][-1]
+        # fields: ["日期","殖利率(%)","股利年度","本益比","股價淨值比","財報年/季"]
+        return {
+            "pe_ratio": float(latest[3]) if latest[3] else None,
+            "dividend_yield": float(latest[1]) if latest[1] else None,
+            "pb_ratio": float(latest[4]) if latest[4] else None,
+            "dividend_year": latest[2] if len(latest) > 2 else None,
+            "source": "twse",
+        }
+    except Exception:
+        return {}
