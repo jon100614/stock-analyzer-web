@@ -320,8 +320,9 @@ if symbol:
                         st.metric("EPS", summary.get("EPS (Trailing)") or "N/A")
                         st.metric("52週最高", summary.get("52週最高價") or "N/A")
                         st.metric("52週最低", summary.get("52週最低價") or "N/A")
-                    except Exception:
-                        st.write("基本面資料暫時無法取得")
+                        st.caption(f"資料來源：{summary.get('資料來源', 'N/A')}")
+                    except Exception as e:
+                        st.error(f"基本面資料取得失敗：{e}")
 
                 # 大盤走勢
                 st.markdown("---")
