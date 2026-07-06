@@ -10,7 +10,7 @@ import yfinance as yf
 import streamlit as st
 
 from .utils import format_currency_name, normalize_symbol, safe_get
-from .data_fetcher import fetch_twse_fundamentals, fetch_finnhub_fundamentals
+from .data_fetcher import fetch_twse_fundamentals, fetch_tpex_fundamentals, fetch_finnhub_fundamentals
 
 
 def _fetch_yahoo_info(ticker: str) -> dict:
@@ -62,25 +62,44 @@ def fetch_fundamental_data(symbol: str, market: str = "auto") -> dict:
         整理後的基本面資料字典，一定包含 summary 欄位
     """
     ticker = normalize_symbol(symbol, market)
+    tickers_to_try = [ticker]
+
+    # 台股自動嘗試 .TW 與 .TWO
+    if market == "tw" or (market == "auto" and ticker.endswith(".TW")):
+        if not ticker.endswith(".TWO"):
+            tickers_to_try.append(ticker.replace(".TW", ".TWO"))
+        if ticker.endswith(".TW") and f"{symbol}.TWO" not in tickers_to_try:
+            tickers_to_try.append(f"{symbol}.TWO")
+
     query_status = []
 
-    # 1. Yahoo Finance
-    info = _fetch_yahoo_info(ticker)
-    yahoo_error = info.pop("_error", None)
-    if info:
-        query_status.append("Yahoo Finance: 成功")
-    else:
-        query_status.append(f"Yahoo Finance: 失敗 ({yahoo_error or '無資料'})")
+    # 1. Yahoo Finance（嘗試多個 ticker）
+    info = {}
+    actual_ticker = ticker
+    for t in tickers_to_try:
+        info = _fetch_yahoo_info(t)
+        yahoo_error = info.pop("_error", None)
+        # 認定成功需要至少有名稱或市值等關鍵欄位
+        if info and (info.get("longName") or info.get("shortName") or info.get("marketCap")):
+            query_status.append(f"Yahoo Finance ({t}): 成功")
+            actual_ticker = t
+            break
+        else:
+            query_status.append(f"Yahoo Finance ({t}): 失敗 ({yahoo_error or '無資料'})")
 
     # 財務報表
-    income_stmt, balance_sheet, cash_flow = _fetch_yahoo_financials(ticker)
+    income_stmt, balance_sheet, cash_flow = _fetch_yahoo_financials(actual_ticker)
+
+    # 使用實際找到資料的 ticker
+    ticker = actual_ticker
 
     # 2. 根據市場選擇替代資料源
     twse_data = {}
+    tpex_data = {}
     finnhub_data = {}
 
-    # 台股：嘗試從證交所補充
-    if ticker.endswith(".TW") or ticker.endswith(".TWO"):
+    # 台股：同時嘗試證交所（上市）與櫃買中心（上櫃）
+    if ticker.endswith(".TW") or ticker.endswith(".TWO") or market == "tw":
         stock_no = symbol.strip().replace(".TW", "").replace(".TWO", "")
         if stock_no.isdigit():
             try:
@@ -91,6 +110,15 @@ def fetch_fundamental_data(symbol: str, market: str = "auto") -> dict:
                     query_status.append("台灣證交所: 無資料")
             except Exception as e:
                 query_status.append(f"台灣證交所: 失敗 ({e})")
+
+            try:
+                tpex_data = fetch_tpex_fundamentals(stock_no)
+                if tpex_data:
+                    query_status.append("櫃買中心: 成功")
+                else:
+                    query_status.append("櫃買中心: 無資料")
+            except Exception as e:
+                query_status.append(f"櫃買中心: 失敗 ({e})")
 
     # 美股/港股：嘗試從 Finnhub 補充
     if not ticker.endswith(".TW") and not ticker.endswith(".TWO"):
@@ -108,9 +136,9 @@ def fetch_fundamental_data(symbol: str, market: str = "auto") -> dict:
             query_status.append(f"Finnhub: 失敗 ({e})")
 
     # 整理重點指標（優先使用 Yahoo Finance，缺失則用替代資料源）
-    pe = safe_get(info, "trailingPE") or twse_data.get("pe_ratio") or finnhub_data.get("pe_ratio")
-    pb = safe_get(info, "priceToBook") or twse_data.get("pb_ratio") or finnhub_data.get("pb_ratio")
-    dividend_yield = safe_get(info, "dividendYield") or twse_data.get("dividend_yield") or finnhub_data.get("dividend_yield")
+    pe = safe_get(info, "trailingPE") or twse_data.get("pe_ratio") or tpex_data.get("pe_ratio") or finnhub_data.get("pe_ratio")
+    pb = safe_get(info, "priceToBook") or twse_data.get("pb_ratio") or tpex_data.get("pb_ratio") or finnhub_data.get("pb_ratio")
+    dividend_yield = safe_get(info, "dividendYield") or twse_data.get("dividend_yield") or tpex_data.get("dividend_yield") or finnhub_data.get("dividend_yield")
 
     fundamentals = {
         "代碼": symbol,
@@ -146,9 +174,11 @@ def fetch_fundamental_data(symbol: str, market: str = "auto") -> dict:
     sources = ["Yahoo Finance"]
     if twse_data:
         sources.append("台灣證交所")
+    if tpex_data:
+        sources.append("櫃買中心")
     if finnhub_data:
         sources.append("Finnhub")
-    fundamentals["資料來源"] = " + ".join(sources) if (info or twse_data or finnhub_data) else "無可用資料源"
+    fundamentals["資料來源"] = " + ".join(sources) if (info or twse_data or tpex_data or finnhub_data) else "無可用資料源"
     fundamentals["查詢狀態"] = " | ".join(query_status)
 
     return {
