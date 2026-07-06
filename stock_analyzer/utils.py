@@ -156,3 +156,45 @@ def safe_get(dictionary: dict, key: str, default=None):
     安全地從 dict 取值。
     """
     return dictionary.get(key, default) if dictionary else default
+
+
+def format_large_number(value: Optional[float], precision: int = 2) -> str:
+    """
+    將大數字格式化為中文慣用單位（億、兆）。
+
+    台灣慣例：
+    - 1 億 = 10^8
+    - 1 兆 = 10^12
+
+    Args:
+        value: 數字
+        precision: 小數位數
+
+    Returns:
+        格式化後的字串，例如 "25.29 億"、"63.79 兆"
+    """
+    if value is None or pd.isna(value):
+        return "N/A"
+
+    try:
+        num = float(value)
+    except (ValueError, TypeError):
+        return str(value)
+
+    if num == 0:
+        return "0"
+
+    abs_num = abs(num)
+    sign = "-" if num < 0 else ""
+
+    # 兆（10^12）
+    if abs_num >= 1_0000_0000_0000:
+        return f"{sign}{abs_num / 1_0000_0000_0000:.{precision}f} 兆"
+    # 億（10^8）
+    elif abs_num >= 1_0000_0000:
+        return f"{sign}{abs_num / 1_0000_0000:.{precision}f} 億"
+    # 萬（10^4）
+    elif abs_num >= 1_0000:
+        return f"{sign}{abs_num / 1_0000:.{precision}f} 萬"
+    else:
+        return f"{sign}{abs_num:,.0f}"
