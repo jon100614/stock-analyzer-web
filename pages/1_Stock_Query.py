@@ -220,11 +220,9 @@ def create_trading_chart(df, name, ticker):
     return fig
 
 
-if st.button("查詢", type="primary") or symbol:
-    if not symbol:
-        st.warning("請輸入股票代碼")
-    else:
-        with st.spinner("正在獲取資料..."):
+# 輸入代碼後自動查詢（按 Enter 或點其他地方即觸發）
+if symbol:
+    with st.spinner("正在獲取資料..."):
             try:
                 info = get_stock_info(symbol, market)
                 ticker = info.get("ticker") or normalize_symbol(symbol, market)
