@@ -213,3 +213,39 @@ def fetch_twse_fundamentals(stock_no: str) -> dict:
         }
     except Exception:
         return {}
+
+
+def fetch_finnhub_fundamentals(symbol: str, api_key: str) -> dict:
+    """
+    從 Finnhub 取得美股/港股基本面資料。
+
+    Args:
+        symbol: 股票代碼，例如 "AAPL", "0700.HK"
+        api_key: Finnhub API Key
+
+    Returns:
+        包含本益比、股價淨值比、股息率、市值等資料的字典，若失敗則回傳空字典
+    """
+    try:
+        url = f"https://finnhub.io/api/v1/stock/metric?symbol={symbol}&metric=all&token={api_key}"
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        metric = data.get("metric", {})
+
+        return {
+            "pe_ratio": metric.get("peTTM"),
+            "pb_ratio": metric.get("pbAnnual") or metric.get("pbQuarterly") or metric.get("pb"),
+            "dividend_yield": metric.get("dividendYieldIndicatedAnnual"),
+            "eps": metric.get("epsTTM") or metric.get("epsAnnual"),
+            "market_cap": metric.get("marketCapitalization") * 1_000_000 if metric.get("marketCapitalization") else None,
+            "roe": metric.get("roeTTM") or metric.get("roeRfy") or metric.get("roe5Y"),
+            "roa": metric.get("roaTTM") or metric.get("roaRfy") or metric.get("roa5Y"),
+            "profit_margin": metric.get("netProfitMarginTTM") or metric.get("netProfitMarginAnnual"),
+            "revenue_growth": metric.get("revenueGrowthTTMYoy") or metric.get("revenueGrowth5Y"),
+            "52_week_high": metric.get("52WeekHigh"),
+            "52_week_low": metric.get("52WeekLow"),
+            "source": "finnhub",
+        }
+    except Exception:
+        return {}
