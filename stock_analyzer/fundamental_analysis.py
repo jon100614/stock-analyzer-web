@@ -1,7 +1,8 @@
 """
 基本面分析模組
 
-使用 yfinance 取得公司基本面資料，包含本益比、EPS、營收等。
+使用多資料源取得公司基本面資料，包含 Yahoo Finance、Finnhub、台灣證交所等。
+當一個資料源找不到資料時，會自動嘗試其他資料源。
 """
 
 import pandas as pd
@@ -12,38 +13,69 @@ from .utils import format_currency_name, normalize_symbol, safe_get
 from .data_fetcher import fetch_twse_fundamentals, fetch_finnhub_fundamentals
 
 
+def _fetch_yahoo_info(ticker: str) -> dict:
+    """從 Yahoo Finance 取得基本資訊，失敗回傳空字典"""
+    try:
+        stock = yf.Ticker(ticker)
+        return stock.info or {}
+    except Exception as e:
+        return {"_error": str(e)}
+
+
+def _fetch_yahoo_financials(ticker: str) -> tuple:
+    """從 Yahoo Finance 取得財務報表，失敗回傳空 DataFrame"""
+    income_stmt = pd.DataFrame()
+    balance_sheet = pd.DataFrame()
+    cash_flow = pd.DataFrame()
+    try:
+        stock = yf.Ticker(ticker)
+        income_stmt = stock.income_stmt
+    except Exception:
+        pass
+    try:
+        stock = yf.Ticker(ticker)
+        balance_sheet = stock.balance_sheet
+    except Exception:
+        pass
+    try:
+        stock = yf.Ticker(ticker)
+        cash_flow = stock.cashflow
+    except Exception:
+        pass
+    return income_stmt, balance_sheet, cash_flow
+
+
 def fetch_fundamental_data(symbol: str, market: str = "auto") -> dict:
     """
     獲取股票基本面資料。
+
+    會依序嘗試多個資料源：
+    1. Yahoo Finance
+    2. 台灣證交所（台股）
+    3. Finnhub（美股/港股）
 
     Args:
         symbol: 股票代碼
         market: 市場別
 
     Returns:
-        整理後的基本面資料字典
+        整理後的基本面資料字典，一定包含 summary 欄位
     """
     ticker = normalize_symbol(symbol, market)
-    stock = yf.Ticker(ticker)
-    info = stock.info or {}
+    query_status = []
 
-    # 取得損益表、資產負債表、現金流量表（若可用）
-    try:
-        income_stmt = stock.income_stmt
-    except Exception:
-        income_stmt = pd.DataFrame()
+    # 1. Yahoo Finance
+    info = _fetch_yahoo_info(ticker)
+    yahoo_error = info.pop("_error", None)
+    if info:
+        query_status.append("Yahoo Finance: 成功")
+    else:
+        query_status.append(f"Yahoo Finance: 失敗 ({yahoo_error or '無資料'})")
 
-    try:
-        balance_sheet = stock.balance_sheet
-    except Exception:
-        balance_sheet = pd.DataFrame()
+    # 財務報表
+    income_stmt, balance_sheet, cash_flow = _fetch_yahoo_financials(ticker)
 
-    try:
-        cash_flow = stock.cashflow
-    except Exception:
-        cash_flow = pd.DataFrame()
-
-    # 根據市場選擇替代資料源
+    # 2. 根據市場選擇替代資料源
     twse_data = {}
     finnhub_data = {}
 
@@ -51,7 +83,14 @@ def fetch_fundamental_data(symbol: str, market: str = "auto") -> dict:
     if ticker.endswith(".TW") or ticker.endswith(".TWO"):
         stock_no = symbol.strip().replace(".TW", "").replace(".TWO", "")
         if stock_no.isdigit():
-            twse_data = fetch_twse_fundamentals(stock_no)
+            try:
+                twse_data = fetch_twse_fundamentals(stock_no)
+                if twse_data:
+                    query_status.append("台灣證交所: 成功")
+                else:
+                    query_status.append("台灣證交所: 無資料")
+            except Exception as e:
+                query_status.append(f"台灣證交所: 失敗 ({e})")
 
     # 美股/港股：嘗試從 Finnhub 補充
     if not ticker.endswith(".TW") and not ticker.endswith(".TWO"):
@@ -59,8 +98,14 @@ def fetch_fundamental_data(symbol: str, market: str = "auto") -> dict:
             finnhub_key = st.secrets.get("FINNHUB_API_KEY") if hasattr(st, "secrets") else None
             if finnhub_key:
                 finnhub_data = fetch_finnhub_fundamentals(ticker, finnhub_key)
-        except Exception:
-            finnhub_data = {}
+                if finnhub_data:
+                    query_status.append("Finnhub: 成功")
+                else:
+                    query_status.append("Finnhub: 無資料")
+            else:
+                query_status.append("Finnhub: 未設定 API Key")
+        except Exception as e:
+            query_status.append(f"Finnhub: 失敗 ({e})")
 
     # 整理重點指標（優先使用 Yahoo Finance，缺失則用替代資料源）
     pe = safe_get(info, "trailingPE") or twse_data.get("pe_ratio") or finnhub_data.get("pe_ratio")
@@ -103,7 +148,8 @@ def fetch_fundamental_data(symbol: str, market: str = "auto") -> dict:
         sources.append("台灣證交所")
     if finnhub_data:
         sources.append("Finnhub")
-    fundamentals["資料來源"] = " + ".join(sources)
+    fundamentals["資料來源"] = " + ".join(sources) if (info or twse_data or finnhub_data) else "無可用資料源"
+    fundamentals["查詢狀態"] = " | ".join(query_status)
 
     return {
         "summary": fundamentals,
@@ -123,14 +169,11 @@ def format_fundamental_summary(data: dict) -> pd.DataFrame:
     summary = data.get("summary", {})
     df = pd.DataFrame(list(summary.items()), columns=["項目", "數值"])
 
-    # 資料來源標記
-    source = summary.get("資料來源", "Yahoo Finance")
-
-    # 將小數轉為百分比（Yahoo Finance 回傳的是小數）
-    yahoo_percent_fields = ["營收成長率", "利潤率", "營業毛利率", "營業利益率", "ROE", "ROA"]
+    # 將小數轉為百分比
+    percent_fields = ["營收成長率", "利潤率", "營業毛利率", "營業利益率", "ROE", "ROA"]
     for idx, row in df.iterrows():
         val = row["數值"]
-        if row["項目"] in yahoo_percent_fields and isinstance(val, (int, float)):
+        if row["項目"] in percent_fields and isinstance(val, (int, float)):
             df.at[idx, "數值"] = f"{val * 100:.2f}%"
         elif row["項目"] == "股息率" and isinstance(val, (int, float)):
             # 各資料源皆回傳百分比數字
