@@ -9,7 +9,7 @@ from groq import Groq
 
 from stock_analyzer import fetch_stock_data, fetch_stock_info, fetch_fundamental_data
 from stock_analyzer.technical_analysis import analyze_all_indicators, generate_signals
-from stock_analyzer.utils import format_currency_name
+from stock_analyzer.utils import format_currency_name, format_large_number
 
 st.title("🤖 AI 投資建議")
 
@@ -138,7 +138,7 @@ def build_prompt(symbol, market, data, question):
 {signal_text}
 
 ## 基本面資料
-- 市值：{fund.get('市值') or 'N/A'}
+- 市值：{format_large_number(fund.get('市值'))}
 - 本益比 (Trailing P/E)：{fund.get('本益比 (Trailing P/E)') or 'N/A'}
 - 遠期本益比：{fund.get('遠期本益比 (Forward P/E)') or 'N/A'}
 - EPS (Trailing)：{fund.get('EPS (Trailing)') or 'N/A'}
