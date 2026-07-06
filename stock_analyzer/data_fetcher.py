@@ -8,6 +8,8 @@
 import yfinance as yf
 import pandas as pd
 import requests
+import re
+import json
 from datetime import datetime
 from typing import Optional
 
@@ -211,6 +213,52 @@ def fetch_twse_fundamentals(stock_no: str) -> dict:
             "dividend_year": latest[2] if len(latest) > 2 else None,
             "source": "twse",
         }
+    except Exception:
+        return {}
+
+
+def fetch_tpex_fundamentals(stock_no: str) -> dict:
+    """
+    從櫃買中心取得上櫃股票基本面資料（本益比、殖利率、股價淨值比）。
+
+    Args:
+        stock_no: 上櫃股票數字代碼，例如 "3158"
+
+    Returns:
+        包含最新本益比、殖利率、股價淨值比的字典，若失敗則回傳空字典
+    """
+    try:
+        today = datetime.now()
+        roc_year = today.year - 1911
+        roc_date = f"{roc_year}/{today.strftime('%m/%d')}"
+        url = (
+            "https://www.tpex.org.tw/web/stock/aftertrading/peratio_analysis/"
+            f"pera_result.php?l=zh-tw&d={roc_date}&code={stock_no}"
+        )
+        resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+
+        # 從 HTML 中提取 JSON
+        m = re.search(r'({"tables":.*?})<', resp.text, re.DOTALL)
+        if not m:
+            m = re.search(r'({"tables":.*})', resp.text, re.DOTALL)
+        if not m:
+            return {}
+
+        data = json.loads(m.group(1))
+        table_data = data.get("tables", [{}])[0].get("data", [])
+
+        for row in table_data:
+            if row[0] == stock_no:
+                # fields: [股票代號, 股票名稱, 本益比, 每股股利, 股利年度, 殖利率(%), 股價淨值比, 財報年季]
+                return {
+                    "pe_ratio": float(row[2]) if row[2] else None,
+                    "dividend_yield": float(row[5]) if row[5] else None,
+                    "pb_ratio": float(row[6]) if row[6] else None,
+                    "dividend_per_share": float(row[3]) if row[3] else None,
+                    "source": "tpex",
+                }
+        return {}
     except Exception:
         return {}
 
