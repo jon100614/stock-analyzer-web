@@ -9,7 +9,7 @@ import pandas as pd
 import yfinance as yf
 import streamlit as st
 
-from .utils import format_currency_name, normalize_symbol, safe_get
+from .utils import format_currency_name, format_large_number, normalize_symbol, safe_get
 from .data_fetcher import fetch_twse_fundamentals, fetch_tpex_fundamentals, fetch_finnhub_fundamentals
 
 
@@ -209,7 +209,7 @@ def format_fundamental_summary(data: dict) -> pd.DataFrame:
             # 各資料源皆回傳百分比數字
             df.at[idx, "數值"] = f"{val:.2f}%"
         elif row["項目"] in ["市值", "企業價值"] and isinstance(val, (int, float)):
-            df.at[idx, "數值"] = f"{val:,.0f}"
+            df.at[idx, "數值"] = format_large_number(val)
         elif row["項目"] in ["本益比 (Trailing P/E)", "遠期本益比 (Forward P/E)", "股價淨值比"] and isinstance(val, (int, float)):
             df.at[idx, "數值"] = f"{val:.2f}"
 
