@@ -20,6 +20,7 @@ pg = st.navigation(
         st.Page("pages/3_Fundamental_Analysis.py", title="基本面分析", icon="📑"),
         st.Page("pages/4_Portfolio.py", title="投資組合", icon="💼"),
         st.Page("pages/5_Stock_Screener.py", title="選股篩選", icon="🔎"),
+        st.Page("pages/6_AI_Advisor.py", title="AI 投資建議", icon="🤖"),
     ],
     position="sidebar",
 )
