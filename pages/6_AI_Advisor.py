@@ -28,35 +28,52 @@ except Exception:
         "請聯繫管理員或到 Groq (https://console.groq.com) 建立 API Key 後在 Streamlit Cloud 設定。"
     )
 
-# 主畫面
-symbol = st.text_input(
-    "股票代碼",
-    value="AAPL",
-    help="例如：AAPL、TSLA、2330、2330.TW、0700",
-).upper().strip()
 
-market_options = {"自動判斷": "auto", "美國": "us", "台灣": "tw", "香港": "hk"}
-market_label = st.selectbox(
-    "市場",
-    options=list(market_options.keys()),
-    index=0,
-    help="自動判斷會優先視為台股。台股會先嘗試 .TW（上市），失敗再嘗試 .TWO（上櫃）",
-)
-market = market_options[market_label]
+# 初始化 session state
+if "run_analysis" not in st.session_state:
+    st.session_state.run_analysis = False
 
-model_options = {
-    "Llama 3.1 8B（快速）": "llama-3.1-8b-instant",
-    "Llama 3.3 70B（較聰明）": "llama-3.3-70b-versatile",
-    "Mixtral 8x7B": "mixtral-8x7b-32768",
-}
-model_label = st.selectbox("語言模型", options=list(model_options.keys()), index=1)
-model = model_options[model_label]
 
-question = st.text_area(
-    "你想問什麼？",
-    value="請分析這檔股票的技術面與基本面，並給出買入、賣出或觀望的建議。",
-    help="可以輸入具體問題，例如：『這檔股票適合長期持有嗎？』、『現在可以進場嗎？』",
-)
+def trigger_analysis():
+    """設定觸發分析的標記"""
+    st.session_state.run_analysis = True
+
+
+# 側邊欄：分析設定
+with st.sidebar:
+    st.header("分析設定")
+
+    symbol = st.text_input(
+        "股票代碼",
+        value="AAPL",
+        help="例如：AAPL、TSLA、2330、2330.TW、0700。輸入後按 Enter 即可分析。",
+        on_change=trigger_analysis,
+    ).upper().strip()
+
+    market_options = {"自動判斷": "auto", "美國": "us", "台灣": "tw", "香港": "hk"}
+    market_label = st.selectbox(
+        "市場",
+        options=list(market_options.keys()),
+        index=0,
+        help="自動判斷會優先視為台股。台股會先嘗試 .TW（上市），失敗再嘗試 .TWO（上櫃）",
+    )
+    market = market_options[market_label]
+
+    model_options = {
+        "Llama 3.1 8B（快速）": "llama-3.1-8b-instant",
+        "Llama 3.3 70B（較聰明）": "llama-3.3-70b-versatile",
+        "Mixtral 8x7B": "mixtral-8x7b-32768",
+    }
+    model_label = st.selectbox("語言模型", options=list(model_options.keys()), index=1)
+    model = model_options[model_label]
+
+    question = st.text_area(
+        "你想問什麼？",
+        value="請分析這檔股票的技術面與基本面，並給出買入、賣出或觀望的建議。",
+        help="可以輸入具體問題，例如：『這檔股票適合長期持有嗎？』",
+    )
+
+    st.button("問 AI", type="primary", on_click=trigger_analysis)
 
 
 @st.cache_data(ttl=300)
@@ -144,7 +161,10 @@ def build_prompt(symbol, market, data, question):
     return prompt
 
 
-if st.button("問 AI", type="primary"):
+# 主畫面：顯示分析結果
+if st.session_state.run_analysis:
+    st.session_state.run_analysis = False
+
     if not api_key:
         st.error("系統尚未設定 GROQ_API_KEY，請聯繫管理員。")
     elif not symbol:
