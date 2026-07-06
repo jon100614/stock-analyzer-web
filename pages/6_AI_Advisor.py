@@ -1,7 +1,7 @@
 """
 AI 投資建議頁面
 
-使用 Groq API 提供股票分析建議。
+使用 Groq API 提供股票分析建議。API Key 由網站管理員在 Streamlit Cloud Secrets 設定。
 """
 
 import streamlit as st
@@ -18,19 +18,14 @@ st.warning(
     icon="⚠️",
 )
 
-# 側邊欄輸入
-with st.sidebar:
-    st.header("設定")
-
-    api_key = st.text_input(
-        "Groq API Key",
-        type="password",
-        help="請到 https://console.groq.com 取得 API Key。此 key 只會存在於本次對話，不會被儲存。",
-    )
-
-    st.divider()
-    st.caption(
-        "還沒有 API Key？請到 https://console.groq.com 免費註冊並建立。"
+# 從 Streamlit Secrets 讀取 API Key
+try:
+    api_key = st.secrets["GROQ_API_KEY"]
+except Exception:
+    api_key = None
+    st.error(
+        "⚠️ 此功能需要網站管理員在 Streamlit Cloud Secrets 設定 GROQ_API_KEY。"
+        "請聯繫管理員或到 Groq (https://console.groq.com) 建立 API Key 後在 Streamlit Cloud 設定。"
     )
 
 # 主畫面
@@ -151,7 +146,7 @@ def build_prompt(symbol, market, data, question):
 
 if st.button("問 AI", type="primary"):
     if not api_key:
-        st.error("請先輸入 Groq API Key")
+        st.error("系統尚未設定 GROQ_API_KEY，請聯繫管理員。")
     elif not symbol:
         st.error("請輸入股票代碼")
     else:
