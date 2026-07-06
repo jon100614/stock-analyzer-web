@@ -17,7 +17,7 @@ from stock_analyzer import (
     format_fundamental_summary,
 )
 from stock_analyzer.technical_analysis import analyze_all_indicators, generate_signals
-from stock_analyzer.utils import format_currency_name, normalize_symbol
+from stock_analyzer.utils import format_currency_name, format_large_number, normalize_symbol
 
 st.title("🔍 股票查詢")
 
@@ -315,7 +315,7 @@ if symbol:
                     try:
                         fund = get_fundamental_data(symbol, market)
                         summary = fund["summary"]
-                        st.metric("市值", f"{summary.get('市值') or 0:,.0f}")
+                        st.metric("市值", format_large_number(summary.get('市值')))
                         st.metric("本益比", summary.get("本益比 (Trailing P/E)") or "N/A")
                         st.metric("EPS", summary.get("EPS (Trailing)") or "N/A")
                         st.metric("52週最高", summary.get("52週最高價") or "N/A")
