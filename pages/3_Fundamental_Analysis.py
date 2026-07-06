@@ -29,8 +29,13 @@ if st.button("查詢基本面", type="primary"):
                 st.subheader(f"{symbol} 基本面摘要")
                 st.dataframe(summary, width="stretch", hide_index=True)
 
-                # 關鍵指標卡片
+                # 查詢狀態
                 s = data["summary"]
+                status = s.get("查詢狀態", "")
+                if status:
+                    st.caption(f"📡 {status}")
+
+                # 關鍵指標卡片
                 st.subheader("關鍵指標")
                 c1, c2, c3, c4 = st.columns(4)
                 with c1:
@@ -41,7 +46,13 @@ if st.button("查詢基本面", type="primary"):
                     st.metric("股價淨值比", f"{pb:.2f}" if isinstance(pb, (int, float)) else "N/A")
                 with c3:
                     dy = s.get("股息率")
-                    st.metric("股息率", f"{dy*100:.2f}%" if isinstance(dy, (int, float)) else "N/A")
+                    if isinstance(dy, str) and dy.endswith("%"):
+                        dy_display = dy
+                    elif isinstance(dy, (int, float)):
+                        dy_display = f"{dy:.2f}%"
+                    else:
+                        dy_display = "N/A"
+                    st.metric("股息率", dy_display)
                 with c4:
                     mc = s.get("市值")
                     st.metric("市值", f"{mc:,.0f}" if isinstance(mc, (int, float)) else "N/A")
