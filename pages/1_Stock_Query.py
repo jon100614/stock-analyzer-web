@@ -1,12 +1,14 @@
 """
-股票查詢頁面
+股票查詢頁面 - 線上看盤風格
 
-將股價、技術指標、基本面與大盤資訊整合在同一頁，類似看盤軟體版面。
+整合股價、技術指標、基本面與大盤資訊在同一頁，採用深色看盤介面。
 """
 
 import streamlit as st
 import pandas as pd
-import yfinance as yf
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from stock_analyzer import (
     fetch_stock_data,
@@ -49,9 +51,8 @@ with st.sidebar:
         options=["1d", "1wk", "1mo"],
         index=0,
     )
-
     st.divider()
-    st.caption("開啟網頁後直接輸入代碼即可查詢，所有資訊會顯示在同一頁。")
+    st.caption("輸入代碼後按查詢，所有資訊會顯示在同一頁。")
 
 
 @st.cache_data(ttl=300)
@@ -81,85 +82,221 @@ def get_index_data(index_symbol, period, interval):
         return pd.DataFrame()
 
 
+def create_trading_chart(df, name, ticker):
+    """建立線上看盤風格多子圖圖表"""
+    # 子圖布局：主圖、成交量、RSI、MACD
+    fig = make_subplots(
+        rows=4,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.5, 0.15, 0.15, 0.2],
+        subplot_titles=(f"{name} ({ticker}) - K線與均線", "成交量", "RSI", "MACD"),
+    )
+
+    # 主圖：K線
+    fig.add_trace(
+        go.Candlestick(
+            x=df.index,
+            open=df["open"],
+            high=df["high"],
+            low=df["low"],
+            close=df["close"],
+            name="K線",
+            increasing_line_color="#ff4d4d",
+            decreasing_line_color="#00c853",
+            increasing_fillcolor="#ff4d4d",
+            decreasing_fillcolor="#00c853",
+        ),
+        row=1,
+        col=1,
+    )
+
+    # 主圖：移動平均線
+    colors_ma = {"ma_5": "#ffd700", "ma_20": "#00d4ff", "ma_60": "#ff69b4"}
+    for col, color in colors_ma.items():
+        if col in df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=df.index,
+                    y=df[col],
+                    name=col.upper().replace("MA_", "MA"),
+                    line=dict(color=color, width=1.2),
+                ),
+                row=1,
+                col=1,
+            )
+
+    # 成交量
+    colors_vol = [
+        "#ff4d4d" if df["close"].iloc[i] >= df["open"].iloc[i] else "#00c853"
+        for i in range(len(df))
+    ]
+    fig.add_trace(
+        go.Bar(
+            x=df.index,
+            y=df["volume"],
+            name="成交量",
+            marker_color=colors_vol,
+        ),
+        row=2,
+        col=1,
+    )
+
+    # RSI
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["rsi"],
+            name="RSI",
+            line=dict(color="#00d4ff", width=1.2),
+        ),
+        row=3,
+        col=1,
+    )
+    fig.add_hline(y=70, line=dict(color="#ff4d4d", dash="dash", width=1), row=3, col=1)
+    fig.add_hline(y=30, line=dict(color="#00c853", dash="dash", width=1), row=3, col=1)
+
+    # MACD
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["macd"],
+            name="MACD",
+            line=dict(color="#00d4ff", width=1.2),
+        ),
+        row=4,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["macd_signal"],
+            name="訊號線",
+            line=dict(color="#ff69b4", width=1.2),
+        ),
+        row=4,
+        col=1,
+    )
+    colors_macd = ["#ff4d4d" if v >= 0 else "#00c853" for v in df["macd_hist"]]
+    fig.add_trace(
+        go.Bar(
+            x=df.index,
+            y=df["macd_hist"],
+            name="MACD柱",
+            marker_color=colors_macd,
+        ),
+        row=4,
+        col=1,
+    )
+
+    # 深色主題布局
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0f0f0f",
+        font=dict(color="#e0e0e0", size=11),
+        xaxis_rangeslider_visible=False,
+        height=800,
+        margin=dict(l=40, r=40, t=50, b=40),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(0,0,0,0.5)",
+        ),
+        hovermode="x unified",
+    )
+
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor="#2a2a2a")
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor="#2a2a2a")
+    fig.update_yaxes(title_text="價格", row=1, col=1)
+    fig.update_yaxes(title_text="成交量", row=2, col=1)
+    fig.update_yaxes(title_text="RSI", row=3, col=1)
+    fig.update_yaxes(title_text="MACD", row=4, col=1)
+
+    return fig
+
+
 if st.button("查詢", type="primary") or symbol:
     if not symbol:
         st.warning("請輸入股票代碼")
     else:
         with st.spinner("正在獲取資料..."):
             try:
-                # 基本資訊
                 info = get_stock_info(symbol, market)
                 ticker = info.get("ticker") or normalize_symbol(symbol, market)
                 name = info.get("longName") or info.get("shortName") or symbol
                 currency = format_currency_name(info.get("currency"))
 
-                # 股價資料
                 df = get_stock_data(symbol, market, period, interval)
                 df = analyze_all_indicators(df)
                 latest = df.iloc[-1]
                 prev_close = info.get("previousClose") or df["close"].iloc[-2]
 
-                # 計算漲跌
                 change = latest["close"] - prev_close if prev_close else 0
                 change_pct = (change / prev_close * 100) if prev_close else 0
 
-                # 標題區
-                st.header(f"{name} ({ticker})")
-                st.caption(
-                    f"{info.get('industry') or ''} / {info.get('sector') or ''} / {info.get('country') or ''}"
+                # 頂部報價列 - 線上看盤風格
+                st.markdown(
+                    f"""
+                    <div style="background-color:#1a1a1a; padding:15px; border-radius:8px; border-left:4px solid #00d4ff;">
+                        <span style="font-size:24px; font-weight:bold; color:#ffffff;">{name}</span>
+                        <span style="font-size:18px; color:#888888;"> {ticker}</span>
+                        <span style="font-size:14px; color:#888888;"> | {info.get('industry') or ''} {info.get('sector') or ''}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
                 )
 
-                # 關鍵報價指標
-                col1, col2, col3, col4, col5, col6 = st.columns(6)
-                with col1:
-                    st.metric("最新價", f"{latest['close']:,.2f}")
-                with col2:
-                    st.metric("漲跌", f"{change:+,.2f}", f"{change_pct:+.2f}%")
-                with col3:
-                    st.metric("成交量", f"{int(latest['volume']):,}")
-                with col4:
-                    st.metric("開盤", f"{info.get('open') or latest['open']:,.2f}")
-                with col5:
-                    st.metric(
-                        "最高",
-                        f"{info.get('dayHigh') or df['high'].max():,.2f}",
-                    )
-                with col6:
-                    st.metric(
-                        "最低",
-                        f"{info.get('dayLow') or df['low'].min():,.2f}",
-                    )
+                quote_cols = st.columns(6)
+                quote_items = [
+                    ("最新價", f"{latest['close']:,.2f}", f"{change:+,.2f} ({change_pct:+.2f}%)"),
+                    ("開盤", f"{info.get('open') or latest['open']:,.2f}", ""),
+                    ("最高", f"{info.get('dayHigh') or df['high'].max():,.2f}", ""),
+                    ("最低", f"{info.get('dayLow') or df['low'].min():,.2f}", ""),
+                    ("成交量", f"{int(latest['volume']):,}", ""),
+                    ("貨幣", currency, ""),
+                ]
+                for col, (label, value, delta) in zip(quote_cols, quote_items):
+                    with col:
+                        if delta:
+                            color = "#ff4d4d" if change >= 0 else "#00c853"
+                            st.markdown(
+                                f"""
+                                <div style="text-align:center; padding:10px; background-color:#0f0f0f; border-radius:5px;">
+                                    <div style="font-size:12px; color:#888888;">{label}</div>
+                                    <div style="font-size:20px; font-weight:bold; color:{color};">{value}</div>
+                                    <div style="font-size:12px; color:{color};">{delta}</div>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.markdown(
+                                f"""
+                                <div style="text-align:center; padding:10px; background-color:#0f0f0f; border-radius:5px;">
+                                    <div style="font-size:12px; color:#888888;">{label}</div>
+                                    <div style="font-size:18px; font-weight:bold; color:#ffffff;">{value}</div>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
 
-                # 主畫面：走勢圖 + 右側資訊
-                chart_col, info_col = st.columns([3, 1])
+                st.markdown("---")
+
+                # 主區域：圖表 + 右側資訊
+                chart_col, info_col = st.columns([4, 1])
 
                 with chart_col:
-                    st.subheader("股價走勢")
-                    chart_df = df[["close", "ma_5", "ma_20", "ma_60"]].rename(
-                        columns={
-                            "close": "收盤價",
-                            "ma_5": "MA5",
-                            "ma_20": "MA20",
-                            "ma_60": "MA60",
-                        }
-                    )
-                    st.line_chart(chart_df, use_container_width=True)
-
-                    st.subheader("成交量")
-                    vol_df = df[["volume", "volume_ma_20"]].rename(
-                        columns={"volume": "成交量", "volume_ma_20": "量MA20"}
-                    )
-                    st.bar_chart(vol_df, use_container_width=True)
+                    fig = create_trading_chart(df, name, ticker)
+                    st.plotly_chart(fig, use_container_width=True)
 
                 with info_col:
-                    st.subheader("技術指標")
+                    st.subheader("技術訊號")
                     signals = generate_signals(df)
-                    st.metric("RSI (14)", f"{signals['rsi']:.2f}")
-                    st.metric("MACD", f"{signals['macd']:.4f}")
-                    st.metric("布林 %B", f"{latest.get('bb_percent', 0):.2f}")
-
-                    st.divider()
-                    st.subheader("訊號")
                     if signals["signals"]:
                         for sig in signals["signals"]:
                             st.write(f"• {sig}")
@@ -167,59 +304,72 @@ if st.button("查詢", type="primary") or symbol:
                         st.write("暫無明確訊號")
 
                     st.divider()
-                    st.subheader("報價摘要")
-                    st.metric("市值", f"{info.get('marketCap') or 0:,.0f}")
-                    st.metric("本益比", info.get("trailingPE") or "N/A")
-                    st.metric("EPS", info.get("trailingEps") or "N/A")
-                    st.metric("52週最高", info.get("fiftyTwoWeekHigh") or "N/A")
-                    st.metric("52週最低", info.get("fiftyTwoWeekLow") or "N/A")
+                    st.subheader("技術指標")
+                    st.metric("RSI (14)", f"{signals['rsi']:.2f}")
+                    st.metric("MACD", f"{signals['macd']:.4f}")
+                    st.metric("布林 %B", f"{latest.get('bb_percent', 0):.2f}")
+                    st.metric("MA5", f"{latest.get('ma_5', 0):.2f}")
+                    st.metric("MA20", f"{latest.get('ma_20', 0):.2f}")
+                    st.metric("MA60", f"{latest.get('ma_60', 0):.2f}")
+
+                    st.divider()
+                    st.subheader("基本面")
+                    try:
+                        fund = get_fundamental_data(symbol, market)
+                        summary = fund["summary"]
+                        st.metric("市值", f"{summary.get('市值') or 0:,.0f}")
+                        st.metric("本益比", summary.get("本益比 (Trailing P/E)") or "N/A")
+                        st.metric("EPS", summary.get("EPS (Trailing)") or "N/A")
+                        st.metric("52週最高", summary.get("52週最高價") or "N/A")
+                        st.metric("52週最低", summary.get("52週最低價") or "N/A")
+                    except Exception:
+                        st.write("基本面資料暫時無法取得")
 
                 # 大盤走勢
+                st.markdown("---")
                 st.subheader("大盤走勢")
-                index_map = {
-                    "us": "^GSPC",  # S&P 500
-                    "tw": "^TWII",  # 加權指數
-                    "hk": "^HSI",  # 恆生指數
-                }
+                index_map = {"us": "^GSPC", "tw": "^TWII", "hk": "^HSI"}
                 if market in index_map:
-                    index_df = get_index_data(index_map[market], period, interval)
-                    if not index_df.empty:
-                        st.line_chart(
-                            index_df[["close"]].rename(columns={"close": "大盤收盤"}),
-                            use_container_width=True,
-                    )
-                    else:
-                        st.info("大盤資料暫時無法取得")
+                    idx = index_map[market]
+                elif currency == "新台幣":
+                    idx = "^TWII"
+                elif currency == "港幣":
+                    idx = "^HSI"
                 else:
-                    # 自動判斷時依貨幣猜測
-                    if currency == "新台幣":
-                        idx = "^TWII"
-                    elif currency == "港幣":
-                        idx = "^HSI"
-                    else:
-                        idx = "^GSPC"
-                    index_df = get_index_data(idx, period, interval)
-                    if not index_df.empty:
-                        st.line_chart(
-                            index_df[["close"]].rename(columns={"close": "大盤收盤"}),
-                            use_container_width=True,
+                    idx = "^GSPC"
+
+                index_df = get_index_data(idx, period, interval)
+                if not index_df.empty:
+                    fig_idx = go.Figure()
+                    fig_idx.add_trace(
+                        go.Scatter(
+                            x=index_df.index,
+                            y=index_df["close"],
+                            name="大盤收盤",
+                            line=dict(color="#00d4ff", width=1.5),
+                            fill="tozeroy",
+                            fillcolor="rgba(0, 212, 255, 0.1)",
                         )
-                    else:
-                        st.info("大盤資料暫時無法取得")
+                    )
+                    fig_idx.update_layout(
+                        template="plotly_dark",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="#0f0f0f",
+                        font=dict(color="#e0e0e0"),
+                        height=300,
+                        margin=dict(l=40, r=40, t=30, b=40),
+                        xaxis_rangeslider_visible=False,
+                    )
+                    fig_idx.update_xaxes(showgrid=True, gridcolor="#2a2a2a")
+                    fig_idx.update_yaxes(showgrid=True, gridcolor="#2a2a2a")
+                    st.plotly_chart(fig_idx, use_container_width=True)
+                else:
+                    st.info("大盤資料暫時無法取得")
 
-                # 基本面摘要
-                st.subheader("基本面摘要")
-                try:
-                    fund = get_fundamental_data(symbol, market)
-                    summary_df = format_fundamental_summary(fund)
-                    st.dataframe(summary_df, use_container_width=True, hide_index=True)
-                except Exception as e:
-                    st.warning(f"基本面資料取得失敗：{e}")
-
-                # K 線資料表
-                st.subheader("K 線資料")
-                display_df = df.tail(50).copy()
-                display_df = display_df.round(2)
+                # K線資料表
+                st.markdown("---")
+                st.subheader("K線資料")
+                display_df = df.tail(50).copy().round(2)
                 st.dataframe(display_df, use_container_width=True)
 
                 # 匯出
