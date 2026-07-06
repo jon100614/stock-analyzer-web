@@ -7,6 +7,7 @@ numpy>=1.24.0
 
 # Plotting
 matplotlib>=3.7.0
+plotly>=5.18.0
 
 # Excel export
 openpyxl>=3.1.0
@@ -14,6 +15,9 @@ openpyxl>=3.1.0
 # Jupyter Notebook
 jupyter>=1.0.0
 ipykernel>=6.0.0
+
+# AI / LLM
+groq>=0.9.0
 
 # Web App
 streamlit>=1.28.0
