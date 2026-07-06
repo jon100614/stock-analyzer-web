@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 
 from stock_analyzer import fetch_fundamental_data, format_fundamental_summary
+from stock_analyzer.utils import format_large_number
 
 st.title("📑 基本面分析")
 
@@ -55,7 +56,7 @@ if st.button("查詢基本面", type="primary"):
                     st.metric("股息率", dy_display)
                 with c4:
                     mc = s.get("市值")
-                    st.metric("市值", f"{mc:,.0f}" if isinstance(mc, (int, float)) else "N/A")
+                    st.metric("市值", format_large_number(mc))
 
                 # 財務報表
                 tabs = st.tabs(["損益表", "資產負債表", "現金流量表"])
