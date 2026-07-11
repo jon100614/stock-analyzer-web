@@ -183,84 +183,95 @@ def fetch_dividends_and_splits(symbol: str, market: str = "auto") -> tuple[pd.Se
     return stock.dividends, stock.splits
 
 
-def fetch_twse_fundamentals(stock_no: str) -> dict:
+def fetch_twse_fundamentals(stock_no: str, max_days: int = 10) -> dict:
     """
     從台灣證交所取得台股基本面資料（本益比、殖利率、股價淨值比）。
 
+    若當日無資料（例如假日），會自動往前追溯最近交易日。
+
     Args:
         stock_no: 台股數字代碼，例如 "2330"
+        max_days: 最多往前追溯幾天
 
     Returns:
         包含最新本益比、殖利率、股價淨值比的字典，若失敗則回傳空字典
     """
-    try:
-        today = datetime.now().strftime("%Y%m%d")
-        url = f"https://www.twse.com.tw/rwd/zh/afterTrading/BWIBBU?date={today}&stockNo={stock_no}&response=json"
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
+    base = datetime.now()
+    for i in range(max_days):
+        try:
+            date_str = (base - pd.Timedelta(days=i)).strftime("%Y%m%d")
+            url = f"https://www.twse.com.tw/rwd/zh/afterTrading/BWIBBU?date={date_str}&stockNo={stock_no}&response=json"
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
 
-        if data.get("stat") != "OK" or not data.get("data"):
-            return {}
+            if data.get("stat") == "OK" and data.get("data"):
+                # 取最後一筆（最新交易日）
+                latest = data["data"][-1]
+                # fields: ["日期","殖利率(%)","股利年度","本益比","股價淨值比","財報年/季"]
+                return {
+                    "pe_ratio": float(latest[3]) if latest[3] else None,
+                    "dividend_yield": float(latest[1]) if latest[1] else None,
+                    "pb_ratio": float(latest[4]) if latest[4] else None,
+                    "dividend_year": latest[2] if len(latest) > 2 else None,
+                    "source": "twse",
+                    "date": latest[0] if latest else date_str,
+                }
+        except Exception:
+            continue
+    return {}
 
-        # 取最後一筆（最新交易日）
-        latest = data["data"][-1]
-        # fields: ["日期","殖利率(%)","股利年度","本益比","股價淨值比","財報年/季"]
-        return {
-            "pe_ratio": float(latest[3]) if latest[3] else None,
-            "dividend_yield": float(latest[1]) if latest[1] else None,
-            "pb_ratio": float(latest[4]) if latest[4] else None,
-            "dividend_year": latest[2] if len(latest) > 2 else None,
-            "source": "twse",
-        }
-    except Exception:
-        return {}
 
-
-def fetch_tpex_fundamentals(stock_no: str) -> dict:
+def fetch_tpex_fundamentals(stock_no: str, max_days: int = 10) -> dict:
     """
     從櫃買中心取得上櫃股票基本面資料（本益比、殖利率、股價淨值比）。
 
+    若當日無資料（例如假日），會自動往前追溯最近交易日。
+
     Args:
         stock_no: 上櫃股票數字代碼，例如 "3158"
+        max_days: 最多往前追溯幾天
 
     Returns:
         包含最新本益比、殖利率、股價淨值比的字典，若失敗則回傳空字典
     """
-    try:
-        today = datetime.now()
-        roc_year = today.year - 1911
-        roc_date = f"{roc_year}/{today.strftime('%m/%d')}"
-        url = (
-            "https://www.tpex.org.tw/web/stock/aftertrading/peratio_analysis/"
-            f"pera_result.php?l=zh-tw&d={roc_date}&code={stock_no}"
-        )
-        resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
+    base = datetime.now()
+    for i in range(max_days):
+        try:
+            day = base - pd.Timedelta(days=i)
+            roc_year = day.year - 1911
+            roc_date = f"{roc_year}/{day.strftime('%m/%d')}"
+            url = (
+                "https://www.tpex.org.tw/web/stock/aftertrading/peratio_analysis/"
+                f"pera_result.php?l=zh-tw&d={roc_date}&code={stock_no}"
+            )
+            resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            resp.raise_for_status()
 
-        # 從 HTML 中提取 JSON
-        m = re.search(r'({"tables":.*?})<', resp.text, re.DOTALL)
-        if not m:
-            m = re.search(r'({"tables":.*})', resp.text, re.DOTALL)
-        if not m:
-            return {}
+            # 從 HTML 中提取 JSON
+            m = re.search(r'({"tables":.*?})<', resp.text, re.DOTALL)
+            if not m:
+                m = re.search(r'({"tables":.*})', resp.text, re.DOTALL)
+            if not m:
+                continue
 
-        data = json.loads(m.group(1))
-        table_data = data.get("tables", [{}])[0].get("data", [])
+            data = json.loads(m.group(1))
+            table_data = data.get("tables", [{}])[0].get("data", [])
 
-        for row in table_data:
-            if row[0] == stock_no:
-                # fields: [股票代號, 股票名稱, 本益比, 每股股利, 股利年度, 殖利率(%), 股價淨值比, 財報年季]
-                return {
-                    "pe_ratio": float(row[2]) if row[2] else None,
-                    "dividend_yield": float(row[5]) if row[5] else None,
-                    "pb_ratio": float(row[6]) if row[6] else None,
-                    "dividend_per_share": float(row[3]) if row[3] else None,
-                    "source": "tpex",
-                }
-        return {}
-    except Exception:
-        return {}
+            for row in table_data:
+                if row[0] == stock_no:
+                    # fields: [股票代號, 股票名稱, 本益比, 每股股利, 股利年度, 殖利率(%), 股價淨值比, 財報年季]
+                    return {
+                        "pe_ratio": float(row[2]) if row[2] else None,
+                        "dividend_yield": float(row[5]) if row[5] else None,
+                        "pb_ratio": float(row[6]) if row[6] else None,
+                        "dividend_per_share": float(row[3]) if row[3] else None,
+                        "source": "tpex",
+                        "date": roc_date,
+                    }
+        except Exception:
+            continue
+    return {}
 
 
 def fetch_finnhub_fundamentals(symbol: str, api_key: str) -> dict:
